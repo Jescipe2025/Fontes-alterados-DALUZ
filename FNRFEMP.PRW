@@ -1,0 +1,317 @@
+#INCLUDE "TOTVS.ch"
+#INCLUDE "topconn.ch"
+
+/*/{Protheus.doc} U_FNRFEMP
+Função para recalcular o campo C6_QTDEMP (Quantidade Empenhada)
+Calcula pela soma de C9_QTDLIB da SC9 (Pedidos Liberados) onde C9_NFISCAL está em branco
+
+@type User Function
+@author Adaptado
+@since 09/02/2026
+@version 1.0
+/*/
+
+User Function FNRFEMP()
+    Local aArea      := GetArea()
+    Local dDtIni     := CToD("")
+    Local dDtFim     := CToD("")
+    Local cPedIni    := ""
+    Local cPedFim    := ""
+    Local cProdIni   := ""
+    Local cProdFim   := ""
+    Local nTipoVis   := 1  // 1=Apenas Diferenças, 2=Todos
+    
+    If !MsgYesNo("Esta rotina irá recalcular o campo C6_QTDEMP (Quantidade Empenhada)." + CRLF + ;
+                 "Deseja continuar?", "Atenção")
+        RestArea(aArea)
+        Return
+    EndIf
+    
+    // Monta tela de parâmetros
+    If !MontaPerguntas(@dDtIni, @dDtFim, @cPedIni, @cPedFim, @cProdIni, @cProdFim, @nTipoVis)
+        MsgInfo("Operação cancelada.", "Aviso")
+        RestArea(aArea)
+        Return
+    EndIf
+    
+    // Processa e mostra prévia
+    ProcPrevia(dDtIni, dDtFim, cPedIni, cPedFim, cProdIni, cProdFim, nTipoVis)
+    
+    RestArea(aArea)
+    
+Return
+
+/*/{Protheus.doc} MontaPerguntas
+Função para montar tela de parâmetros
+@type function
+/*/
+Static Function MontaPerguntas(dDtIni, dDtFim, cPedIni, cPedFim, cProdIni, cProdFim, nTipoVis)
+    Local lRet          := .F.
+    Local oDlg
+    Local oGetDtIni, oGetDtFim
+    Local oGetPedIni, oGetPedFim
+    Local oGetProdIni, oGetProdFim
+    Local oCmbTipoVis
+    Local aTipoVis      := {"Apenas Diferenças", "Todos"}
+    Local cTipoVis      := aTipoVis[1]
+    Local nOpcA         := 0
+    
+    // Valores padrão
+    dDtIni     := FirstDate(Date())
+    dDtFim     := Date()
+    cPedIni    := Space(6)
+    cPedFim    := Replicate("Z", 6)
+    cProdIni   := Space(15)
+    cProdFim   := Replicate("Z", 15)
+    nTipoVis   := 1
+    
+    DEFINE MSDIALOG oDlg TITLE "Recálculo C6_QTDEMP - Quantidade Empenhada" FROM 000,000 TO 280,400 PIXEL
+        
+        @ 010,010 SAY "Data Emissão De:" SIZE 060,007 PIXEL OF oDlg
+        @ 010,080 MSGET oGetDtIni VAR dDtIni SIZE 060,010 PIXEL OF oDlg VALID !Empty(dDtIni)
+        
+        @ 025,010 SAY "Data Emissão Até:" SIZE 060,007 PIXEL OF oDlg
+        @ 025,080 MSGET oGetDtFim VAR dDtFim SIZE 060,010 PIXEL OF oDlg VALID !Empty(dDtFim) .And. dDtFim >= dDtIni
+        
+        @ 040,010 SAY "Pedido Venda De:" SIZE 060,007 PIXEL OF oDlg
+        @ 040,080 MSGET oGetPedIni VAR cPedIni SIZE 060,010 PIXEL OF oDlg F3 "SC5"
+        
+        @ 055,010 SAY "Pedido Venda Até:" SIZE 060,007 PIXEL OF oDlg
+        @ 055,080 MSGET oGetPedFim VAR cPedFim SIZE 060,010 PIXEL OF oDlg F3 "SC5"
+        
+        @ 070,010 SAY "Produto De:" SIZE 060,007 PIXEL OF oDlg
+        @ 070,080 MSGET oGetProdIni VAR cProdIni SIZE 060,010 PIXEL OF oDlg F3 "SB1"
+        
+        @ 085,010 SAY "Produto Até:" SIZE 060,007 PIXEL OF oDlg
+        @ 085,080 MSGET oGetProdFim VAR cProdFim SIZE 060,010 PIXEL OF oDlg F3 "SB1"
+        
+        @ 100,010 SAY "Visualizar:" SIZE 060,007 PIXEL OF oDlg
+        @ 100,080 MSCOMBOBOX oCmbTipoVis VAR cTipoVis ITEMS aTipoVis SIZE 080,010 PIXEL OF oDlg
+        
+        @ 125,080 BUTTON "Confirmar" SIZE 040,012 PIXEL OF oDlg ACTION (nOpcA := 1, oDlg:End())
+        @ 125,130 BUTTON "Cancelar"  SIZE 040,012 PIXEL OF oDlg ACTION (nOpcA := 0, oDlg:End())
+        
+    ACTIVATE MSDIALOG oDlg CENTERED
+    
+    If nOpcA == 1
+        If Empty(cPedIni)
+            cPedIni := Space(6)
+        EndIf
+        If Empty(cPedFim)
+            cPedFim := Replicate("Z", 6)
+        EndIf
+        If Empty(cProdIni)
+            cProdIni := Space(15)
+        EndIf
+        If Empty(cProdFim)
+            cProdFim := Replicate("Z", 15)
+        EndIf
+        
+        nTipoVis := aScan(aTipoVis, cTipoVis)
+        
+        lRet := .T.
+    EndIf
+    
+Return lRet
+
+/*/{Protheus.doc} ProcPrevia
+Processa e mostra prévia dos dados
+@type function
+/*/
+Static Function ProcPrevia(dDtIni, dDtFim, cPedIni, cPedFim, cProdIni, cProdFim, nTipoVis)
+    Local cQuery := ""
+    Local aDados := {}
+    Local cTitulo := ""
+    
+    // Monta query
+    cQuery := MontaQuery(dDtIni, dDtFim, cPedIni, cPedFim, cProdIni, cProdFim, nTipoVis)
+    
+    // Executa query
+    Processa({|| aDados := ExecutaQuery(cQuery)}, "Aguarde", "Consultando dados...", .F.)
+    
+    If Len(aDados) == 0
+        MsgInfo("Nenhum registro encontrado com os parâmetros informados.", "Aviso")
+        Return
+    EndIf
+    
+    // Define título
+    cTitulo := IIF(nTipoVis == 1, "Prévia - Apenas Diferenças (RESERVAS)", "Prévia - Todos os Registros (RESERVAS)")
+    
+    // Mostra browse
+    MostraBrowse(aDados, cTitulo, nTipoVis)
+    
+Return
+
+/*/{Protheus.doc} MontaQuery
+Monta a query de consulta
+@type function
+/*/
+Static Function MontaQuery(dDtIni, dDtFim, cPedIni, cPedFim, cProdIni, cProdFim, nTipoVis)
+    Local cQuery := ""
+    
+    cQuery := " SELECT " + CRLF
+    cQuery += "     SC6.R_E_C_N_O_ AS RECNOSC6, " + CRLF
+    cQuery += "     SC6.C6_FILIAL, " + CRLF
+    cQuery += "     SC6.C6_NUM AS PEDIDO, " + CRLF
+    cQuery += "     SC6.C6_ITEM AS ITEM, " + CRLF
+    cQuery += "     SC6.C6_PRODUTO AS PRODUTO, " + CRLF
+    cQuery += "     SC6.C6_QTDVEN AS QTD_VENDIDA, " + CRLF
+    cQuery += "     SC6.C6_QTDEMP AS QTDEMP_ATUAL, " + CRLF
+    cQuery += "     ISNULL(SC9_TOTAL.TOTAL_SC9, 0) AS QTDEMP_NOVO, " + CRLF
+    cQuery += "     (SC6.C6_QTDEMP - ISNULL(SC9_TOTAL.TOTAL_SC9, 0)) AS DIFERENCA " + CRLF
+    cQuery += " FROM " + RetSqlName("SC6") + " SC6 " + CRLF
+    cQuery += " INNER JOIN " + RetSqlName("SC5") + " SC5 ON " + CRLF
+    cQuery += "     SC5.C5_FILIAL = SC6.C6_FILIAL " + CRLF
+    cQuery += "     AND SC5.C5_NUM = SC6.C6_NUM " + CRLF
+    cQuery += "     AND SC5.D_E_L_E_T_ = ' ' " + CRLF
+    cQuery += " LEFT JOIN ( " + CRLF
+    cQuery += "     SELECT " + CRLF
+    cQuery += "         C9_FILIAL, C9_PEDIDO, C9_ITEM, C9_PRODUTO, " + CRLF
+    cQuery += "         SUM(C9_QTDLIB) AS TOTAL_SC9 " + CRLF
+    cQuery += "     FROM " + RetSqlName("SC9") + " " + CRLF
+    cQuery += "     WHERE D_E_L_E_T_ = ' ' " + CRLF
+    cQuery += "       AND C9_NFISCAL = ' ' " + CRLF
+    cQuery += "     GROUP BY C9_FILIAL, C9_PEDIDO, C9_ITEM, C9_PRODUTO " + CRLF
+    cQuery += " ) SC9_TOTAL ON " + CRLF
+    cQuery += "     SC9_TOTAL.C9_FILIAL = SC6.C6_FILIAL " + CRLF
+    cQuery += "     AND SC9_TOTAL.C9_PEDIDO = SC6.C6_NUM " + CRLF
+    cQuery += "     AND SC9_TOTAL.C9_ITEM = SC6.C6_ITEM " + CRLF
+    cQuery += "     AND SC9_TOTAL.C9_PRODUTO = SC6.C6_PRODUTO " + CRLF
+    cQuery += " WHERE SC6.D_E_L_E_T_ = ' ' " + CRLF
+    cQuery += "   AND SC6.C6_FILIAL = '" + xFilial("SC6") + "' " + CRLF
+    cQuery += "   AND SC5.C5_EMISSAO BETWEEN '" + DToS(dDtIni) + "' AND '" + DToS(dDtFim) + "' " + CRLF
+    cQuery += "   AND SC6.C6_NUM BETWEEN '" + cPedIni + "' AND '" + cPedFim + "' " + CRLF
+    cQuery += "   AND SC6.C6_PRODUTO BETWEEN '" + cProdIni + "' AND '" + cProdFim + "' " + CRLF
+    
+    // Se for apenas diferenças
+    If nTipoVis == 1
+        cQuery += "   AND SC6.C6_QTDEMP <> ISNULL(SC9_TOTAL.TOTAL_SC9, 0) " + CRLF
+    EndIf
+    
+    cQuery += " ORDER BY SC6.C6_NUM, SC6.C6_ITEM " + CRLF
+    
+Return cQuery
+
+/*/{Protheus.doc} ExecutaQuery
+Executa query e retorna array com dados
+@type function
+/*/
+Static Function ExecutaQuery(cQuery)
+    Local aDados := {}
+    Local cAlias := GetNextAlias()
+    
+    TCQUERY cQuery NEW ALIAS (cAlias)
+    
+    TCSetField(cAlias, "QTD_VENDIDA", "N", 12, 2)
+    TCSetField(cAlias, "QTDEMP_ATUAL", "N", 12, 2)
+    TCSetField(cAlias, "QTDEMP_NOVO", "N", 12, 2)
+    TCSetField(cAlias, "DIFERENCA", "N", 12, 2)
+    
+    While (cAlias)->(!EOF())
+        AADD(aDados, {(cAlias)->RECNOSC6, ;
+                      (cAlias)->C6_FILIAL, ;
+                      (cAlias)->PEDIDO, ;
+                      (cAlias)->ITEM, ;
+                      (cAlias)->PRODUTO, ;
+                      (cAlias)->QTD_VENDIDA, ;
+                      (cAlias)->QTDEMP_ATUAL, ;
+                      (cAlias)->QTDEMP_NOVO, ;
+                      (cAlias)->DIFERENCA})
+        (cAlias)->(dbSkip())
+    EndDo
+    
+    (cAlias)->(dbCloseArea())
+    
+Return aDados
+
+/*/{Protheus.doc} MostraBrowse
+Mostra browse com os dados
+@type function
+/*/
+Static Function MostraBrowse(aDados, cTitulo, nTipoVis)
+    Local oDlg
+    Local oBrowse
+    Local nOpcao := 0
+    
+    DEFINE MSDIALOG oDlg TITLE cTitulo FROM 000,000 TO 500,900 PIXEL
+        
+        @ 005,005 SAY "Total de registros: " + cValToChar(Len(aDados)) SIZE 200,010 PIXEL OF oDlg
+        
+        oBrowse := TWBrowse():New(015,005,440,210,,{"Filial","Pedido","Item","Produto","Qtd Vendida","C6_QTDEMP Atual","Empenho Localizado","Diferença"},,oDlg,,,,,,,,,,,,.F.,,.T.,,.F.,,,)
+        oBrowse:SetArray(aDados)
+        oBrowse:bLine := {|| {aDados[oBrowse:nAt][2], ;
+                              aDados[oBrowse:nAt][3], ;
+                              aDados[oBrowse:nAt][4], ;
+                              aDados[oBrowse:nAt][5], ;
+                              Transform(aDados[oBrowse:nAt][6], "@E 999,999.99"), ;
+                              Transform(aDados[oBrowse:nAt][7], "@E 999,999.99"), ;
+                              Transform(aDados[oBrowse:nAt][8], "@E 999,999.99"), ;
+                              Transform(aDados[oBrowse:nAt][9], "@E 999,999.99")}}
+        
+        // Se for diferenças, mostra botão GRAVAR
+        If nTipoVis == 1
+            @ 230,300 BUTTON "Gravar C6_QTDEMP" SIZE 060,012 PIXEL OF oDlg ;
+                ACTION (nOpcao := 1, oDlg:End())
+            @ 230,370 BUTTON "Fechar" SIZE 040,012 PIXEL OF oDlg ;
+                ACTION (nOpcao := 0, oDlg:End())
+        Else
+            @ 230,350 BUTTON "Fechar" SIZE 040,012 PIXEL OF oDlg ;
+                ACTION (nOpcao := 0, oDlg:End())
+        EndIf
+        
+    ACTIVATE MSDIALOG oDlg CENTERED
+    
+    // Se confirmou gravação
+    If nOpcao == 1 .And. nTipoVis == 1
+        If MsgYesNo("Confirma a gravação do campo C6_QTDEMP para " + cValToChar(Len(aDados)) + " registro(s)?", "Confirmação")
+            GravarC6QTDEMP(aDados)
+        EndIf
+    EndIf
+    
+Return
+
+/*/{Protheus.doc} GravarC6QTDEMP
+Grava o campo C6_QTDEMP
+@type function
+/*/
+Static Function GravarC6QTDEMP(aDados)
+    Local nRecalc := 0
+    Local nErros := 0
+    
+    dbSelectArea("SC6")
+    SC6->(dbSetOrder(1))
+    
+    Processa({|| ProcGrava(@aDados, @nRecalc, @nErros)}, "Gravando", "Atualizando C6_QTDEMP...", .T.)
+    
+    MsgInfo("Processo concluído!" + CRLF + ;
+            "Registros atualizados: " + cValToChar(nRecalc) + CRLF + ;
+            "Erros: " + cValToChar(nErros), "Finalizado")
+    
+Return
+
+/*/{Protheus.doc} ProcGrava
+Processa gravação
+@type function
+/*/
+Static Function ProcGrava(aDados, nRecalc, nErros)
+    Local i
+    
+    ProcRegua(Len(aDados))
+    
+    For i := 1 To Len(aDados)
+        
+        IncProc("Gravando: " + aDados[i][3] + "/" + aDados[i][4])
+        
+        SC6->(dbGoto(aDados[i][1]))
+        
+        If RecLock("SC6", .F.)
+            SC6->C6_QTDEMP := aDados[i][8]  // QTDEMP_NOVO
+            SC6->(MsUnlock())
+            nRecalc++
+        Else
+            nErros++
+        EndIf
+        
+    Next i
+    
+Return
