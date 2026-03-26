@@ -68,10 +68,10 @@ User Function fnpnlsc6()
             ACTION (oDlg:End(), U_FNRFEMP()) FONT oFont12
         @ 222,030 SAY "Recalcula empenho (SC9 - Liberações pendentes)" SIZE 250,007 PIXEL OF oPanel FONT oFont10 COLOR CLR_GRAY
         
-        // Botão 6 - FNRFSLD (Saldos em Estoque)
-        //@ 235,020 BUTTON "Saldos em Estoque - Consulta/Atualização" SIZE 260,020 PIXEL OF oPanel ;
-        //    ACTION (oDlg:End(), U_FNRFSLD()) FONT oFont12
-        //@ 257,030 SAY "Consulta e atualiza saldos em estoque (SB2 - Saldos por Armazém)" SIZE 250,007 PIXEL OF oPanel FONT oFont10 COLOR CLR_GRAY
+        //Botão 6 - FNRFSLD (Saldos em Estoque)
+        @ 235,020 BUTTON "Saldos em Estoque SB2 - Consulta/Atualização" SIZE 260,020 PIXEL OF oPanel ;
+            ACTION (oDlg:End(), U_RECALCSB2()) FONT oFont12
+        @ 257,030 SAY "Consulta e atualiza saldos em estoque (SB2 - Saldos por Armazém)" SIZE 250,007 PIXEL OF oPanel FONT oFont10 COLOR CLR_GRAY
         
         // Rodapé
         @ 275,010 SAY "_______________________________________________________________________________" SIZE 280,007 PIXEL OF oPanel
